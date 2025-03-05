@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # Core Infrastructure
+  jenkins:
+    image: jenkins/jenkins:lts
+    ports:
+      - "8080:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+
+  # Testing Tools
+  robot-framework:
+    build:
+      context: ./docker/robot-framework
+    volumes:
+      - ./tests:/tests
+
+  appium:
+    image: appium/appium:latest
+    ports:
+      - "4723:4723"
+    volumes:
+      - ./mobile-tests:/mobile-tests
+
+  # Data Collection
+  influxdb:
+    image: influxdb:latest
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+
+  # Monitoring
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - influxdb
+
+  # Android USB/IP
+  usbip-server:
+    build:
+      context: ./docker/usbip
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+
+volumes:
+  jenkins_home:
+  influxdb_data:
+  grafana_data:
