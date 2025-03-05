@@ -1,0 +1,323 @@
+name: PVL Testing Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - battery
+        - motor
+        - android
+        - performance
+
+jobs:
+  # Stage 1: Static code analysis
+  static-analysis:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pylint mypy
+          pip install -r requirements.txt
+          
+      - name: Run flake8
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        
+      - name: Run pylint
+        run: pylint --disable=all --enable=unused-import,unused-variable,unused-argument,import-error demo/
+        
+      - name: Check Docker files
+        run: |
+          docker run --rm -i hadolint/hadolint < demo/simulation/scooter-simulator/Dockerfile
+  
+  # Stage 2: Build test containers
+  build-containers:
+    name: Build Test Containers
+    needs: static-analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Build Scooter Simulator
+        uses: docker/build-push-action@v4
+        with:
+          context: ./demo/simulation/scooter-simulator
+          push: false
+          load: true
+          tags: pvl-testing/scooter-simulator:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Test Container
+        run: |
+          docker run --rm pvl-testing/scooter-simulator:latest python -c "import simulator.battery; print('Battery simulator loaded successfully')"
+          
+      - name: Save container for next stages
+        run: |
+          docker save pvl-testing/scooter-simulator:latest > /tmp/scooter-simulator.tar
+          
+      - name: Upload container artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: scooter-simulator
+          path: /tmp/scooter-simulator.tar
+  
+  # Stage 3: Unit Tests
+  unit-tests:
+    name: Unit Tests
+    needs: build-containers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+          pip install -r requirements.txt
+          
+      - name: Run pytest
+        run: |
+          pytest tests/unit --cov=demo/simulation --cov-report=xml
+          
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: true
+  
+  # Stage 4: Integration Tests
+  integration-tests:
+    name: Integration Tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download container artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: scooter-simulator
+          path: /tmp
+          
+      - name: Load Docker image
+        run: |
+          docker load < /tmp/scooter-simulator.tar
+          
+      - name: Start test services
+        run: |
+          cd demo/simulation
+          docker-compose up -d
+          
+      - name: Run integration tests
+        run: |
+          cd demo/simulation
+          python -m pytest tests/integration
+          
+      - name: Collect logs
+        if: always()
+        run: |
+          docker-compose logs > integration-test-logs.txt
+          
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-test-logs
+          path: integration-test-logs.txt
+  
+  # Stage 5: System Tests
+  system-tests:
+    name: System Tests
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download container artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: scooter-simulator
+          path: /tmp
+          
+      - name: Load Docker image
+        run: |
+          docker load < /tmp/scooter-simulator.tar
+          
+      - name: Start full test environment
+        run: |
+          cd demo/simulation
+          docker-compose -f docker-compose.yml -f docker-compose.system-tests.yml up -d
+          
+      - name: Run system tests
+        run: |
+          cd demo/simulation
+          python -m pytest tests/system
+          
+      - name: Collect test artifacts
+        if: always()
+        run: |
+          mkdir -p test-artifacts
+          cp demo/simulation/reports/* test-artifacts/ || true
+          docker-compose logs > test-artifacts/system-test-logs.txt
+          
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: system-test-artifacts
+          path: test-artifacts
+  
+  # Stage 6: Performance Tests
+  performance-tests:
+    name: Performance Tests
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download container artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: scooter-simulator
+          path: /tmp
+          
+      - name: Load Docker image
+        run: |
+          docker load < /tmp/scooter-simulator.tar
+          
+      - name: Start test environment
+        run: |
+          cd demo/simulation
+          docker-compose up -d
+          
+      - name: Run performance tests
+        run: |
+          cd demo/simulation
+          python -m pytest tests/performance --junitxml=performance-results.xml
+          
+      - name: Generate performance report
+        run: |
+          cd demo/simulation
+          python scripts/generate_performance_report.py
+          
+      - name: Upload performance results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: demo/simulation/performance-report.html
+  
+  # Stage 7: Security Tests
+  security-tests:
+    name: Security Tests
+    needs: build-containers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download container artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: scooter-simulator
+          path: /tmp
+          
+      - name: Load Docker image
+        run: |
+          docker load < /tmp/scooter-simulator.tar
+          
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'pvl-testing/scooter-simulator:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+  
+  # Stage 8: Test Report Generation
+  generate-report:
+    name: Generate Test Report
+    needs: [unit-tests, integration-tests, system-tests, performance-tests, security-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download all test artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+          
+      - name: Generate comprehensive test report
+        run: |
+          python scripts/generate_test_report.py --artifacts-dir=artifacts --output-file=test-report.html
+          
+      - name: Upload final test report
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-report
+          path: test-report.html
+          
+  # Stage 9: Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    needs: generate-report
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download container artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: scooter-simulator
+          path: /tmp
+          
+      - name: Load Docker image
+        run: |
+          docker load < /tmp/scooter-simulator.tar
+          
+      - name: Tag image for staging
+        run: |
+          docker tag pvl-testing/scooter-simulator:latest pvl-testing/scooter-simulator:staging
+          
+      - name: Deploy to staging environment
+        run: |
+          echo "Deploying to staging environment"
+          echo "In a real scenario, this would push to a registry and deploy"
+          
+      - name: Verify deployment
+        run: |
+          echo "Verifying deployment to staging"
+          echo "In a real scenario, this would run smoke tests against staging"
