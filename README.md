@@ -14,6 +14,12 @@ The PVL (Product Verification Laboratory) serves as a critical function in EV de
 - **Real-time Data Analysis**: InfluxDB, Grafana, and Python data science stack
 - **CI/CD Pipeline**: Automated test execution with Jenkins
 
+## 📚 Documentation
+
+- [Industry Best Practices for Software Testing with Docker](./docs/industry-best-practices.md) - Current industry standards and case studies
+- [USB/IP with Docker: A Practical Guide](./docs/usb-ip-docker-guide.md) - Detailed implementation guide for USB/IP testing
+- [Architecture Diagrams](./mermaid-diagrams.md) - Visual representation of the testing infrastructure
+
 ## 🛠️ Tech Stack Components
 
 ### Core Infrastructure
@@ -52,6 +58,7 @@ The PVL (Product Verification Laboratory) serves as a critical function in EV de
 - [`/k8s`](./k8s) - Kubernetes deployment files
 - [`/tests`](./tests) - Example test suites (Robot Framework, pytest)
 - [`/deployment`](./deployment) - Deployment guides
+- [`/docs`](./docs) - Documentation and guides
 - [`/mermaid-diagrams.md`](./mermaid-diagrams.md) - Architecture diagrams using Mermaid.js
 
 ## 🔄 Architecture Diagrams
@@ -107,4 +114,4 @@ Contributions to improve the PVL tech stack are welcome. Please see [CONTRIBUTIN
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
