@@ -46,12 +46,4 @@ The PVL (Product Verification Laboratory) serves as a critical function in EV de
 
 ## Implementation Architecture
 
-See the [architecture diagram](architecture.md) for a visual representation of how these components interact.
-
-## Deployment Guide
-
-Deployment instructions and configuration examples are available in the [deployment](deployment/) directory.
-
-## Contributing
-
-Contributions to improve the PVL tech stack are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+See the [architecture.md](architecture.md) for a visual representation of how these components interact.
